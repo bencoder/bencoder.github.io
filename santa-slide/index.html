@@ -1,0 +1,413 @@
+<html>
+  <head>
+    <title>Santa Slide</title>
+  </head>
+  <body>
+    <canvas width=1280 height=800 id="game"></canvas>
+  </body>
+  <script type="text/javascript">
+    const canvas = document.getElementById('game')
+    const ctx = canvas.getContext('2d')
+    const gridSize = 700
+    const tileSize = 50
+    const startX = 480
+    const startY = 50
+    let santaX = -1
+    let santaY = 8
+    let santaDirection = 'right'
+    let acc = 0
+    let santaProgress = 0
+    let level = 0
+    let running = true
+
+    let sprites = {}
+    function loadImage(url, callback) {
+      const image = new Image()
+      image.onload = callback
+      image.src = url
+    }
+    function loadSprites(spriteList, callback) {
+      let count = 0
+      Object.keys(spriteList).forEach(key => {
+        loadImage(spriteList[key], function(img) {
+          sprites[key] = this
+          count++
+          if (count == Object.keys(spriteList).length) {
+            callback()
+          }
+        })
+      })
+    }
+
+
+    const levels = [
+      {"bumpers":[{"x":3,"y":5,"angle":0},{"x":6,"y":6,"angle":0},{"x":8,"y":5,"angle":0}],"obstacles":[{"x":6,"y":8}],"houses":[{"x":9,"y":8}],"presents":[{"x":3,"y":8,"collected":false,"dropped":false}]},
+      {"bumpers":[{"x":11,"y":4,"angle":0},{"x":4,"y":5,"angle":1},{"x":7,"y":3,"angle":1},{"x":8,"y":6,"angle":1}],"obstacles":[{"x":7,"y":8}],"houses":[{"x":10,"y":8},{"x":12,"y":8},{"x":8,"y":8}],"presents":[{"x":1,"y":8,"collected":false,"dropped":false},{"x":3,"y":8,"collected":false,"dropped":false},{"x":5,"y":8,"collected":false,"dropped":false}]},
+      {"bumpers":[{"x":4,"y":6,"angle":1},{"x":6,"y":6,"angle":1},{"x":8,"y":6,"angle":1}],"obstacles":[{"x":2,"y":4},{"x":11,"y":4},{"x":11,"y":11},{"x":2,"y":11},{"x":7,"y":2},{"x":7,"y":12},{"x":12,"y":8}],"houses":[{"x":4,"y":8}],"presents":[{"x":7,"y":8,"collected":false,"dropped":false}]},
+      {"bumpers":[{"x":9,"y":8,"angle":0},{"x":2,"y":1,"angle":0},{"x":10,"y":10,"angle":0},{"x":11,"y":12,"angle":1},{"x":8,"y":5,"angle":1},{"x":10,"y":1,"angle":0},{"x":9,"y":3,"angle":1},{"x":4,"y":3,"angle":1},{"x":3,"y":9,"angle":0},{"x":12,"y":6,"angle":0},{"x":7,"y":8,"angle":1},{"x":6,"y":4,"angle":1},{"x":5,"y":7,"angle":0}],"presents":[{"x":3,"y":8,"collected":false,"dropped":false},{"x":6,"y":10,"collected":false,"dropped":false},{"x":8,"y":2,"collected":false,"dropped":false},{"x":12,"y":1,"collected":false,"dropped":false},{"x":12,"y":8,"collected":false,"dropped":false}],"obstacles":[{"x":3,"y":7},{"x":12,"y":9},{"x":11,"y":4},{"x":8,"y":3},{"x":3,"y":11},{"x":8,"y":1},{"x":5,"y":5},{"x":5,"y":10},{"x":1,"y":2},{"x":4,"y":1},{"x":7,"y":9},{"x":8,"y":12},{"x":12,"y":12},{"x":11,"y":7},{"x":0,"y":4},{"x":1,"y":13}],"houses":[{"x":12,"y":10},{"x":6,"y":6},{"x":9,"y":10},{"x":5,"y":12},{"x":10,"y":4}]}
+    ]
+    let currentLevel
+
+    const reset = () => {
+      running = false
+      santaX = -1
+      santaY = 8
+      santaDirection = 'right'
+      acc = 0
+      santaProgress = 0
+    }
+    
+    const startLevel = () => {
+      reset()
+      currentLevel = JSON.parse(JSON.stringify(levels[level]))
+    }
+    startLevel()
+
+    const resetLevel = () => {
+      reset()
+      currentLevel.presents.forEach(p => {
+        p.collected = p.dropped = false
+      })
+    }
+
+    const drawButton = () => {
+      ctx.strokeStyle = '#FFFFFF'
+      ctx.beginPath()
+      ctx.rect(50, 500, 350, 100)
+      ctx.stroke()
+      ctx.fillStyle = "#FFFFFF"
+      ctx.font = "50px Georgia";
+      if (running) {
+        ctx.fillText("STOP", 160, 565);
+      } else {
+        ctx.fillText("GO", 185, 565);
+      }
+    }
+
+    const drawBackground = () => {
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0,0,1280,800)
+    }
+
+    const drawGrid = () => {
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.beginPath();
+      for (let x=0;x<=gridSize;x+=tileSize) {
+        ctx.moveTo(startX + x, startY);
+        ctx.lineTo(startX + x, startY + gridSize)
+      }
+      for (let y=0;y<=gridSize;y+=tileSize) {
+        ctx.moveTo(startX, startY+y);
+        ctx.lineTo(startX + gridSize, startY+y)
+      }
+      ctx.stroke();
+    }
+
+    const drawSanta = () => {
+      let x = startX + santaX * tileSize
+      let y = startY + santaY * tileSize
+      switch (santaDirection) {
+        case 'up': y -= tileSize * santaProgress; break
+        case 'down': y += tileSize * santaProgress; break
+        case 'left': x -= tileSize * santaProgress; break
+        case 'right': x += tileSize * santaProgress; break
+      }
+      ctx.drawImage(sprites['santa'], x, y)
+    }
+
+    const drawObstacles = () => {
+      ctx.fillStyle = "#888888"
+      currentLevel.obstacles.forEach(o => {
+        const x = startX + o.x * tileSize
+        const y = startY + o.y * tileSize 
+        ctx.drawImage(sprites['tree'], x, y)
+      })
+    }
+    const drawPresents = () => {
+
+      ctx.font = "25px sans-serif"
+      ctx.beginPath();
+      currentLevel.presents.forEach((p, index) => {
+        if (p.dropped) return
+        let x,y
+        if (p.collected) {
+          x = startX + gridSize + tileSize/2
+          y = startY + index * tileSize  + 10
+        } else {
+          x = startX + p.x * tileSize
+          y = startY + p.y * tileSize
+        }
+        ctx.drawImage(sprites['present'], x, y+5)
+
+        ctx.fillText(index,x+10,y+20)
+      })
+      ctx.stroke();
+    }
+
+    const drawHouses = () => {
+      ctx.font = "25px sans-serif"
+      ctx.beginPath();
+      currentLevel.houses.forEach((h, index) => {
+        if (currentLevel.presents[index].dropped) return
+        x = startX + h.x * tileSize
+        y = startY + h.y * tileSize
+        
+        ctx.drawImage(sprites['house'], x, y+5)
+        ctx.fillText(index,x+10,y+20)
+      })
+      ctx.stroke()
+    }
+
+    const drawBumpers = () => {
+      ctx.strokeStyle = "#FFFFFF"
+      ctx.beginPath()
+      currentLevel.bumpers.forEach(b => {
+        x = startX + b.x * tileSize
+        y = startY + b.y * tileSize + b.angle * tileSize
+        x2 = startX + b.x * tileSize + tileSize
+        y2 = startY + b.y * tileSize + tileSize - b.angle * tileSize
+        ctx.moveTo(x,y)
+        ctx.lineTo(x2,y2)
+      })
+      ctx.stroke()
+    }
+
+    const draw = () => {
+      drawBackground()
+      drawButton()
+      drawGrid()
+      drawPresents()
+      drawHouses()
+      drawBumpers()
+      drawObstacles()
+      drawSanta()
+    }
+
+
+    const timePerGrid = 0.2
+    let hasBounced = false
+    const update = (dt) => {
+      if (!running) {
+        return
+      }
+      acc += dt
+      if (acc >= timePerGrid) {
+        acc -= timePerGrid
+        hasBounced = false
+        switch (santaDirection) {
+          case 'right':
+            santaX += 1
+            break
+          case 'left':
+            santaX -= 1
+            break
+          case 'up':
+            santaY -= 1
+            break
+          case 'down':
+            santaY += 1
+            break
+        }
+      }
+      currentLevel.presents.forEach(p => {
+        if (!p.collected && p.x == santaX && p.y == santaY) {
+          p.collected = true
+        }
+      })
+      currentLevel.houses.forEach((h,i) => {
+        const p = currentLevel.presents[i]
+        if (p.collected && h.x == santaX && h.y == santaY) {
+          p.dropped = true
+        }
+      })
+      if (!hasBounced)
+        currentLevel.bumpers.forEach(b => {
+          if (b.x == santaX && b.y == santaY) {
+            hasBounced = true
+            if (santaDirection == 'right' && b.angle == 0) {
+              santaDirection = 'down'
+              return
+            }
+            if (santaDirection == 'right' && b.angle == 1) {
+              santaDirection = 'up'
+              return
+            }
+            if (santaDirection == 'left' && b.angle == 0) {
+              santaDirection = 'up'
+              return
+            }
+            if (santaDirection == 'left' && b.angle == 1) {
+              santaDirection = 'down'
+              return
+            }
+            if (santaDirection == 'down' && b.angle == 0) {
+              santaDirection = 'right'
+              return
+            }
+            if (santaDirection == 'down' && b.angle == 1) {
+              santaDirection = 'left'
+              return
+            }
+            if (santaDirection == 'up' && b.angle == 0) {
+              santaDirection = 'left'
+              return
+            }
+            if (santaDirection == 'up' && b.angle == 1) {
+              santaDirection = 'right'
+              return
+            }
+          }
+        })
+      santaProgress = acc / timePerGrid
+      currentLevel.obstacles.forEach(o => {
+        if (o.x == santaX && o.y == santaY) {
+          resetLevel()
+        }
+      })
+    }
+
+    let lastTime
+    const frame = time => {
+      if (!lastTime) {
+        lastTime = time
+      }
+      let dt = (time - lastTime) / 1000
+      if (dt > 0.1) {
+        dt = 0.1
+      }
+      lastTime = time
+      draw()
+      update(dt)
+      if (currentLevel.presents.filter(p => !p.dropped).length == 0) {
+        alert('LEVEL COMPLETE')
+        level += 1
+        if (!levels[level]) {
+          alert('GAME COMPLETE')
+          level = 0
+        }
+        if (!isEdit) {
+          startLevel()
+        } else {
+          resetLevel()
+        }
+      }
+      requestAnimationFrame(frame)
+    }
+    canvas.addEventListener('click', e => {
+      if (e.offsetX > 50 && e.offsetX < 400 && e.offsetY > 500 && e.offsetY < 600) {
+        running = !running
+        if (!running) {
+          resetLevel()
+        }
+      }
+    })
+    let selectedBumper = null
+    let isEdit = false
+    canvas.addEventListener('mousedown', e => {
+      if (running) {
+        return
+      }
+      const x = Math.floor((e.offsetX - startX) / tileSize)
+      const y = Math.floor((e.offsetY - startY) / tileSize)
+      currentLevel.bumpers.forEach(b => {
+        if (b.x == x && b.y == y) {
+          selectedBumper = b
+        }
+      })
+      if (isEdit) {
+        currentLevel.houses.forEach(b => {
+          if (b.x == x && b.y == y) {
+            selectedBumper = b
+          }
+        })
+        currentLevel.presents.forEach(b => {
+          if (b.x == x && b.y == y) {
+            selectedBumper = b
+          }
+        })
+        currentLevel.obstacles.forEach(b => {
+          if (b.x == x && b.y == y) {
+            selectedBumper = b
+          }
+        })
+      }
+    })
+    canvas.addEventListener('mousemove', e => {
+      if (running || !selectedBumper) {
+        return
+      }
+      const x = Math.floor((e.offsetX - startX) / tileSize)
+      const y = Math.floor((e.offsetY - startY) / tileSize)
+      if (!isEdit) {
+        let isConflict = false
+        currentLevel.presents.forEach(p => {
+          if (p.x == x && p.y == y) isConflict = true
+        })
+        currentLevel.houses.forEach(h => {
+          if (h.x == x && h.y == y) isConflict = true
+        })
+        currentLevel.obstacles.forEach(h => {
+          if (h.x == x && h.y == y) isConflict = true
+        })
+        if (isConflict) {
+          return
+        }
+      }
+      if (x < 0 || x >= gridSize / tileSize || y < 0 || y >= gridSize / tileSize) {
+        return
+      }
+ 
+      selectedBumper.x = x
+      selectedBumper.y = y
+    })
+    canvas.addEventListener('mouseup', e => {
+      selectedBumper = null
+    })
+    canvas.addEventListener('dblclick', e => {
+      if (running) {
+        return
+      }
+      const x = Math.floor((e.offsetX - startX) / tileSize)
+      const y = Math.floor((e.offsetY - startY) / tileSize)
+      currentLevel.bumpers.forEach(b => {
+        if (b.x == x && b.y == y) {
+          b.angle = 1-b.angle
+        }
+      })
+    })
+    window.addEventListener('keydown', e => {
+      if (isEdit) {
+        if (e.key === 'p') {
+          currentLevel.presents.push({
+            x:0,y:0,collected:false,dropped:false
+          })
+          currentLevel.houses.push({
+            x:0,y:0
+          })
+        }
+        if (e.key === 'o') {
+          currentLevel.obstacles.push({
+            x:0,y:0
+          })
+        }
+        if (e.key === 'b') {
+          currentLevel.bumpers.push({
+            x:0,y:0,angle:0
+          })
+        }
+      }
+    })
+
+
+
+
+    loadSprites({
+      'santa': './santa.png',
+      'house': './fireplace.png',
+      'present': './present.png',
+      'tree': './tree.png',
+    }, () => {
+      requestAnimationFrame(frame)
+    });
+  </script>
+</html>
