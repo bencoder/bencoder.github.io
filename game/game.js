@@ -40,6 +40,15 @@ const drawCircle = (c,r,fill=false) => {
     ctx.stroke();
     if (fill) ctx.fill();
 }
+
+const drawTimer = (time) => {
+    const r = 255;
+    const g = b = Math.floor(255 * (1-time/timeToDie));
+
+    setColor(`rgb(${r},${g},${b})`);
+    ctx.font = '48px serif'
+    ctx.fillText(time.toFixed(1), 10, 40)
+}
 function doesLineInterceptCircle(A, B, C, radius) {
     let dist;
     const v1x = B.x - A.x;
@@ -72,11 +81,18 @@ function Vec2(x,y) {
     this.add = v => new Vec2(this.x+v.x, this.y+v.y);
     this.sub = v => new Vec2(this.x-v.x, this.y-v.y);
     this.len = () => Math.sqrt(this.x*this.x+this.y*this.y);
+    this.mul = n =>new Vec2(this.x*n, this.y*n);
+    this.copy = () => new Vec2(this.x,this.y);
 }
 
 
-const fps = 60;
-const ghostTicks = 13 * fps; //13 seconds
+const tps = 20; // number of ticks per second (FPS is greater and is done by interpolating from the previous movement to the next)
+const timeToDie = 13; //13 seconds to die
+let accumulator = 0; //stores incrementing value (in seconds) until the next tick, when it's then decremented by 1 tick's length
+
+function interpolate(position, movementVector) {
+    return position.sub(movementVector.mul(1-tps*accumulator));
+}
 
 function Level(levelObject) {
     let currentLevel = JSON.parse(JSON.stringify(levelObject));
@@ -133,7 +149,7 @@ function Level(levelObject) {
         }
     }
 
-    this.getStart = () => levelObject.start;
+    this.getStart = () => new Vec2(levelObject.start.x, levelObject.start.y);
 
     this.reset = () => {
         currentLevel = JSON.parse(JSON.stringify(levelObject));
@@ -168,82 +184,57 @@ function Level(levelObject) {
     }
 }
 
-function Player({x,y}, level) {
-    const speed = 100 / fps;
+function Player(level) {
+    const speed = 100 / tps;
     const radius = 10;
-    this.position = new Vec2(x,y);
+    this.position = level.getStart()
+    this.movementVector = new Vec2(0,0); //stores last movement vector
 
     this.draw = () => {
         setColor('green');
-        drawCircle(this.position, radius, true);
-    }
-
-    //similar to ghost movement, used for replaying up to currentTick
-    this.forceMove = vector => {
-        level.interact(this.position, radius, vector);
-        this.position = this.position.add(vector);
+        drawCircle(interpolate(this.position, this.movementVector), radius, true);
     }
 
     this.move = (buttons) => {
         const movement = new Vec2(0,0);
 
-        if (buttons.up) {
-            movement.y -= speed;
-        }
-        if (buttons.down) {
-            movement.y += speed;
-        }
-        if (buttons.left) {
-            movement.x -= speed;
-        }
-        if (buttons.right) {
-            movement.x += speed;
-        }
+        if (buttons.up) movement.y -= speed;
+        if (buttons.down)  movement.y += speed;
+        if (buttons.left) movement.x -= speed;
+        if (buttons.right) movement.x += speed;
 
-        const actualVector = level.interact(this.position, radius, movement)
-        this.position = this.position.add(actualVector);
+        this.movementVector = level.interact(this.position, radius, movement)
+        this.position = this.position.add(this.movementVector);
 
-        return actualVector;
+        return this.movementVector;
     }
 }
 
 
-function Ghost(endPosition, history, level) {
-    let position = new Vec2(endPosition.x, endPosition.y);
+function Ghost(history, level) {
+    let position = level.getStart();
     const radius = 10;
-    let i;
-    for(i=history.length-1; i >= history.length-ghostTicks && i >= 0; --i) {
-        position = position.sub(history[i]);
-    }
-    const startPosition = new Vec2(position.x, position.y);
-    const startTick = i;
-    const myHistory = history.slice(startTick);
+    let movementVector = new Vec2(0,0); //stores the last movementVector
 
     this.tick = currentTick => {
-        if (currentTick < startTick) return;
-        if (currentTick-startTick == myHistory.length) {
+        if (currentTick > history.length) return;
+        if (currentTick == history.length) {
             level.ghostRemoved(position, radius);
             return;
         }
-        if (currentTick-startTick > myHistory.length) return;
-        const movementVector = myHistory[currentTick - startTick];
+        movementVector = history[currentTick];
         level.interact(position, radius, movementVector);
         position = position.add(movementVector); //always apply the vector, cause we're a ghost
     }
 
-    this.reset = (currentTick) => {
-        position = new Vec2(startPosition.x, startPosition.y);
-        let tick = startTick;
-        for (let tick=startTick; tick<currentTick;tick++) {
-            this.tick(tick);
-        }
+    this.draw = currentTick => {
+        if (currentTick > history.length) return; //could draw a dead ghost(??)
+        setColor('orange');
+        drawCircle(interpolate(position, movementVector), radius, true);
     }
 
-    this.draw = currentTick => {
-        if (currentTick < startTick) return;
-        if (currentTick > (startTick + myHistory.length)) return;
-        setColor('orange');
-        drawCircle(position, radius, true);
+    this.reset = () => {
+        position = level.getStart();
     }
 }
 
@@ -254,67 +245,50 @@ const Game = function(levelObject) {
     let currentTick = 0;
     let history = [];
 
-    const buttons = {
-        up:false,
-        down:false,
-        left:false,
-        right:false
+    const buttons = {}
+
+    const die = () => {
+        for(g of ghosts) g.reset();
+        ghosts.push(new Ghost(history, level));
+        currentTick = 0;
+        history = [];
+
+         //reset level and player
+        level.reset();
+        player = new Player(level);
     }
 
-    const draw = () => {
-        camera = player.position;
+    this.draw = () => {
+        camera = interpolate(player.position, player.movementVector);
         clearScreen();
         level.draw();
-        for(g of ghosts) {
-            g.draw(currentTick);
-        }
+        for(g of ghosts) g.draw(currentTick);
         player.draw();
-    }
-
-    const updateGame = () => {
-        history[currentTick] = player.move(buttons);
-        for(g of ghosts) {
-            g.tick(currentTick);
-        }
-    }
-
-    goBack = () => {
-        ghosts.push(new Ghost(player.position,history,level));
-        currentTick -= ghostTicks;  //go back in time
-        if (currentTick < 0) currentTick = 0;
-
-        level.reset(); //reset level and player
-        player = new Player(level.getStart(), level);
-        for (g of ghosts) g.reset(currentTick);
-        history = history.slice(0,currentTick);
-        //play everything forward
-        for(let i=0;i<currentTick;i++) {
-            player.forceMove(history[i]);
-            for (g of ghosts) {
-                g.tick(i);
-            }
-        }
+        drawTimer(currentTick / tps);
     }
 
     this.tick = () => {
-        draw();
-        updateGame();
+        if (currentTick == timeToDie * tps) {
+            die();
+            return;
+        }
+        history[currentTick] = player.move(buttons);
+        for(g of ghosts) g.tick(currentTick);
         ++currentTick;
     }
 
     this.buttonDown = key => {
-        if (key in buttons) {
-            buttons[key] = true;
-        }
+        buttons[key] = true;
         if (key == 'back') {
-            goBack();
+            die();
         }
     }
+
     this.buttonUp = key => buttons[key] = false;
 
     this.loadLevel = (levelObject) => {
         level = new Level(levelObject);
-        player = new Player(levelObject.start, level);
+        player = new Player(level);
     }
 
     if (levelObject) {
@@ -325,16 +299,18 @@ const Game = function(levelObject) {
 const game = new Game(level1);
 
 let previous;
-let accumulator = 0; //stores incrementing value (in seconds) until the next frame, when it's then decremented by 1 frame's length
 const update = time => {
     window.requestAnimationFrame(update);
     if (previous === undefined) { previous = time; }
     const dt = (time - previous) / 1000.0;
     accumulator += dt;
-    if (accumulator > 1.0/fps) {
-        accumulator -= 1.0/fps;
+
+    if (accumulator > 1.0/tps) {
+        accumulator -= 1.0/tps;
         game.tick();
     }
+
+    game.draw();
     previous = time;
 }
 window.requestAnimationFrame(update);
